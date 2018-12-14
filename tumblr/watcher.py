@@ -1,4 +1,5 @@
 import curses
+import os
 import time
 import json
 
@@ -7,6 +8,7 @@ from redis import StrictRedis
 redis_client = StrictRedis()
 redis_pubsub = redis_client.pubsub(ignore_subscribe_messages=True)
 statuses = {}
+FLOOD_MODE = "FLOOD" in os.environ
 
 class TerminalColor:
     HEADER = '\033[95m'
@@ -42,12 +44,19 @@ def on_warrior_message(message):
     else:
         status_color = ""
 
-    statuses[status_key] = ("{status_color}{host}:{port}\t {data}".format(
+    output = "{status_color}{host}:{port}{extra}\t {data}{endc}".format(
         host=data["host"],
         port=data["port"],
         data=data["data"].strip(),
         status_color=status_color,
-    ), data["item_id"])
+        endc=TerminalColor.ENDC if FLOOD_MODE else "",
+        extra="\t" + data["item_id"] if FLOOD_MODE else ""
+    )
+
+    if FLOOD_MODE:
+        print(output)
+    else:
+        statuses[status_key] = (output, data["item_id"])
 
 def draw_statuses(console):
     console.clear()
@@ -99,6 +108,9 @@ redis_pubsub.subscribe(**{"tumblr:warrior": on_warrior_message})
 pubsub_thread = redis_pubsub.run_in_thread(sleep_time=0.001)
 
 try:
-    curses.wrapper(draw_statuses)
+    if "FLOOD" in os.environ:
+        pubsub_thread.join()
+    else:
+        curses.wrapper(draw_statuses)
 except KeyboardInterrupt:
     pubsub_thread.stop()
